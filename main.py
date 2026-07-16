@@ -1,80 +1,67 @@
-python
 import websocket
 import json
 import time
 from datetime import datetime
 import requests
-from textblob import TextBlob
 import threading
 
-# Deriv API Configuration
-DERIV_API_URL = "wss://ws.deriv.com/websockets/v3"
-DERIV_TOKEN = "YOUR_DERIV_API_TOKEN_HERE"  # Replace with your token
-DERIV_ACCOUNT_ID = "1"  # Default account
-
-# Trading Parameters
-SYMBOL = "frxXAUUSD"  # Gold vs USD
-TRADE_AMOUNT = 100  # Trade size in USD
-STOP_LOSS_PIPS = 50  # Stop loss distance
-TAKE_PROFIT_PIPS = 100  # Take profit distance
-
-# Technical Indicator Settings
+# ===== CONFIGURATION - ADJUST THESE SETTINGS =====
+DERIV_API_TOKEN = pat_1d06caa1e918446eb10fdd638da2da09c5f9769d81fbf07137eb45fda98039d6  # Replace with your actual token
+LOT_SIZE = 0.02  # Change this to 0.01, 0.05, 0.1, 0.2, etc. as you prefer
+GOLD_SYMBOL = "frxXAUUSD"
+STOP_LOSS_PERCENT = 2.0
+TAKE_PROFIT_PERCENT = 3.0
 FAST_MA_PERIOD = 9
 SLOW_MA_PERIOD = 21
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
+# ===================================================
 
-# Global Variables
+DERIV_API_URL = "wss://ws.deriv.com/websockets/v3"
+
 ws = None
 prices = []
 last_trade_time = 0
 in_trade = False
-current_trade_id = None
+
 
 def connect_deriv():
-    """Connect to Deriv WebSocket API"""
     global ws
     try:
         ws = websocket.WebSocketApp(
             DERIV_API_URL,
+            on_open=on_open,
             on_message=on_message,
             on_error=on_error,
             on_close=on_close
         )
-        ws.on_open = on_open
         ws.run_forever()
     except Exception as e:
-        print(f"Connection error: {e}")
+        print(f"[BOT] Connection error: {e}")
         time.sleep(5)
         connect_deriv()
 
+
 def on_open(ws):
-    """Authenticate and subscribe to price updates"""
     print("[BOT] Connected to Deriv")
-    auth_message = {
-        "authorize": DERIV_TOKEN
-    }
-    ws.send(json.dumps(auth_message))
+    ws.send(json.dumps({"authorize": DERIV_API_TOKEN}))
     time.sleep(1)
-    
-    # Subscribe to 1-minute candles for XAUUSD
-    subscribe_message = {
-        "ticks_history": SYMBOL,
+    ws.send(json.dumps({
+        "ticks_history": GOLD_SYMBOL,
         "adjust_start_time": 1,
         "count": 100,
         "granularity": 60,
-        "style": "candles"
-    }
-    ws.send(json.dumps(subscribe_message))
+        "style": "candles",
+        "subscribe": 1
+    }))
+
 
 def on_message(ws, message):
-    """Handle incoming messages from Deriv"""
-    global prices, in_trade, current_trade_id
+    global prices
     try:
         data = json.loads(message)
-        
-        # Handle price candle data
+
         if "candles" in data:
             for candle in data["candles"]:
                 prices.append({
@@ -84,180 +71,154 @@ def on_message(ws, message):
                     "close": candle["close"],
                     "time": candle["epoch"]
                 })
-            
-            # Keep only last 100 candles for memory efficiency
             if len(prices) > 100:
                 prices = prices[-100:]
-            
-            # Analyze and trade every 60 seconds
             analyze_and_trade()
-        
-        # Handle trade execution responses
+
+        if "ohlc" in data:
+            candle = data["ohlc"]
+            prices.append({
+                "open": float(candle["open"]),
+                "high": float(candle["high"]),
+                "low": float(candle["low"]),
+                "close": float(candle["close"]),
+                "time": candle["epoch"]
+            })
+            if len(prices) > 100:
+                prices = prices[-100:]
+            analyze_and_trade()
+
         if "buy" in data:
-            trade_response = data["buy"]
-            print(f"[TRADE] Buy order executed: {trade_response}")
-            in_trade = True
-            current_trade_id = trade_response.get("transaction_id")
-        
-        if "sell" in data:
-            trade_response = data["sell"]
-            print(f"[TRADE] Sell order executed: {trade_response}")
-            in_trade = False
-    
+            print(f"[TRADE] Buy order executed: {data['buy']}")
+
+        if "error" in data:
+            print(f"[DERIV ERROR] {data['error'].get('message')}")
+
     except Exception as e:
-        print(f"Message error: {e}")
+        print(f"[BOT] Message handling error: {e}")
+
 
 def on_error(ws, error):
-    """Handle WebSocket errors"""
-    print(f"[ERROR] {error}")
+    print(f"[BOT] WebSocket error: {error}")
+
 
 def on_close(ws, close_status_code, close_msg):
-    """Handle WebSocket closure"""
-    print("[BOT] Disconnected from Deriv. Reconnecting...")
+    print("[BOT] Disconnected. Reconnecting in 5 seconds...")
     time.sleep(5)
     connect_deriv()
 
+
 def fetch_gold_news_sentiment():
-    """Fetch latest gold news and analyze sentiment"""
     try:
-        # Query Google News RSS for gold price news
-        url = "https://news.google.com/rss/search?q=gold+price+XAU+USD"
+        url = "https://news.google.com/rss/search?q=gold%20price%20XAU%20USD"
         response = requests.get(url, timeout=5)
-        
-        if response.status_code == 200:
-            # Simple sentiment extraction from headlines
-            headlines = response.text.split("<title>")[1:6]  # Get first 5 headlines
-            sentiments = []
-            
-            for headline in headlines:
-                headline_text = headline.split("</title>")[0]
-                blob = TextBlob(headline_text)
-                polarity = blob.sentiment.polarity
-                sentiments.append(polarity)
-            
-            if sentiments:
-                avg_sentiment = sum(sentiments) / len(sentiments)
-                return avg_sentiment
-        
-        return 0  # Neutral if no news
+        if response.status_code != 200:
+            return 0
+
+        text = response.text
+        headlines = []
+        parts = text.split("<title>")
+        for part in parts[2:12]:  # skip feed title, grab article titles
+            headline = part.split("</title>")[0]
+            headlines.append(headline)
+
+        if not headlines:
+            return 0
+
+        positive_words = ["rise", "surge", "gain", "rally", "bullish", "high", "up", "soar", "jump"]
+        negative_words = ["fall", "drop", "decline", "bearish", "low", "down", "plunge", "crash", "slump"]
+
+        score = 0
+        for h in headlines:
+            h_lower = h.lower()
+            score += sum(1 for w in positive_words if w in h_lower)
+            score -= sum(1 for w in negative_words if w in h_lower)
+
+        return score / max(len(headlines), 1)
+
     except Exception as e:
         print(f"[NEWS] Error fetching news: {e}")
         return 0
 
+
 def calculate_ma(period):
-    """Calculate moving average"""
     if len(prices) < period:
         return None
     closes = [p["close"] for p in prices[-period:]]
     return sum(closes) / period
 
+
 def calculate_rsi(period=14):
-    """Calculate Relative Strength Index"""
     if len(prices) < period + 1:
         return 50
-    
-    closes = [p["close"] for p in prices[-(period+1):]]
-    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-    
+    closes = [p["close"] for p in prices[-(period + 1):]]
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
     gains = [d for d in deltas if d > 0]
     losses = [abs(d) for d in deltas if d < 0]
-    
     avg_gain = sum(gains) / period if gains else 0
     avg_loss = sum(losses) / period if losses else 0
-    
     if avg_loss == 0:
         return 100 if avg_gain > 0 else 50
-    
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
+
 
 def analyze_and_trade():
-    """Analyze price action and execute trades"""
     global last_trade_time, in_trade
-    
+
     if len(prices) < SLOW_MA_PERIOD:
         return
-    
+
     current_time = time.time()
-    
-    # Trade only once per minute
     if current_time - last_trade_time < 60:
         return
-    
-    # Get current price
+
     current_price = prices[-1]["close"]
-    
-    # Calculate technical indicators
     fast_ma = calculate_ma(FAST_MA_PERIOD)
     slow_ma = calculate_ma(SLOW_MA_PERIOD)
     rsi = calculate_rsi(RSI_PERIOD)
-    
-    # Fetch news sentiment
     news_sentiment = fetch_gold_news_sentiment()
-    
-    # Trading signals
-    bullish_signal = fast_ma > slow_ma and rsi < RSI_OVERBOUGHT and news_sentiment > 0.1
-    bearish_signal = fast_ma < slow_ma and rsi > RSI_OVERSOLD and news_sentiment < -0.1
-    
-    print(f"[{datetime.now()}] Price: {current_price} | FastMA: {fast_ma} | SlowMA: {slow_ma} | RSI: {rsi} | Sentiment: {news_sentiment}")
-    
-    # Execute buy
-    if bullish_signal and not in_trade:
-        stop_loss = current_price - (STOP_LOSS_PIPS * 0.01)
-        take_profit = current_price + (TAKE_PROFIT_PIPS * 0.01)
-        
-        buy_message = {
-            "buy": 1,
-            "price": current_price,
-            "parameters": {
-                "amount": TRADE_AMOUNT,
-                "basis": "stake",
-                "contract_type": "CALL",
-                "currency": "USD",
-                "duration": 1,
-                "duration_unit": "m",
-                "symbol": SYMBOL
-            }
-        }
-        
-        ws.send(json.dumps(buy_message))
+
+    bullish = fast_ma is not None and slow_ma is not None and fast_ma > slow_ma and rsi < RSI_OVERBOUGHT and news_sentiment > 0.1
+    bearish = fast_ma is not None and slow_ma is not None and fast_ma < slow_ma and rsi > RSI_OVERSOLD and news_sentiment < -0.1
+
+    print(f"[{datetime.now()}] Price:{current_price} FastMA:{fast_ma} SlowMA:{slow_ma} RSI:{rsi:.1f} Sentiment:{news_sentiment:.2f}")
+
+    if bullish and not in_trade:
+        place_trade("CALL", current_price)
         last_trade_time = current_time
-        print(f"[BUY SIGNAL] Price: {current_price} | Stop Loss: {stop_loss} | Take Profit: {take_profit}")
-    
-    # Execute sell
-    elif bearish_signal and not in_trade:
-        stop_loss = current_price + (STOP_LOSS_PIPS * 0.01)
-        take_profit = current_price - (TAKE_PROFIT_PIPS * 0.01)
-        
-        sell_message = {
-            "sell": 1,
-            "price": current_price,
-            "parameters": {
-                "amount": TRADE_AMOUNT,
-                "basis": "stake",
-                "contract_type": "PUT",
-                "currency": "USD",
-                "duration": 1,
-                "duration_unit": "m",
-                "symbol": SYMBOL
-            }
-        }
-        
-        ws.send(json.dumps(sell_message))
+    elif bearish and not in_trade:
+        place_trade("PUT", current_price)
         last_trade_time = current_time
-        print(f"[SELL SIGNAL] Price: {current_price} | Stop Loss: {stop_loss} | Take Profit: {take_profit}")
+
+
+def place_trade(contract_type, current_price):
+    global in_trade
+    buy_message = {
+        "buy": 1,
+        "price": LOT_SIZE * 1000,  # stake scales with lot size
+        "parameters": {
+            "amount": LOT_SIZE * 1000,
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": "USD",
+            "duration": 5,
+            "duration_unit": "m",
+            "symbol": GOLD_SYMBOL
+        }
+    }
+    ws.send(json.dumps(buy_message))
+    in_trade = True
+    print(f"[TRADE] {contract_type} order sent at price {current_price} | Lot size: {LOT_SIZE}")
+
 
 def main():
-    """Start the bot"""
     print("[BOT] Starting Autonomous Gold Trading Bot for Deriv XAUUSD")
-    print(f"[BOT] Trade Size: {TRADE_AMOUNT} USD | Stop Loss: {STOP_LOSS_PIPS} pips | Take Profit: {TAKE_PROFIT_PIPS} pips")
-    
-    # Start WebSocket connection in background thread
+    print(f"[BOT] Lot Size: {LOT_SIZE} | Stop Loss: {STOP_LOSS_PERCENT}% | Take Profit: {TAKE_PROFIT_PERCENT}%")
+
     ws_thread = threading.Thread(target=connect_deriv, daemon=True)
     ws_thread.start()
-    
-    # Keep bot running
+
     try:
         while True:
             time.sleep(1)
@@ -265,6 +226,7 @@ def main():
         print("[BOT] Shutting down...")
         if ws:
             ws.close()
+
 
 if __name__ == "__main__":
     main()
