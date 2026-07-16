@@ -11,7 +11,7 @@ load_dotenv()
 
 # ===== CONFIGURATION - ADJUST THESE SETTINGS =====
 DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")
-LOT_SIZE = 0.01
+LOT_SIZE = 0.02
 GOLD_SYMBOL = "frxXAUUSD"
 STOP_LOSS_PERCENT = 2.0
 TAKE_PROFIT_PERCENT = 3.0
@@ -121,7 +121,9 @@ def fetch_gold_news_sentiment():
 
         text = response.text
         headlines = []
-        parts = text.split("")[0]
+        parts = text.split("<title>")
+        for part in parts[2:12]:
+            headline = part.split("</title>")[0]
             headlines.append(headline)
 
         if not headlines:
@@ -196,6 +198,40 @@ def analyze_and_trade():
 
 def place_trade(contract_type, current_price):
     global in_trade
+    stake = LOT_SIZE * 1000
     buy_message = {
         "buy": 1,
-        "price": LOT_SIZE...
+        "price": stake,
+        "parameters": {
+            "amount": stake,
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": "USD",
+            "duration": 5,
+            "duration_unit": "m",
+            "symbol": GOLD_SYMBOL
+        }
+    }
+    ws.send(json.dumps(buy_message))
+    in_trade = True
+    print(f"[TRADE] {contract_type} order sent at price {current_price} | Lot size: {LOT_SIZE}")
+
+
+def main():
+    print("[BOT] Starting Autonomous Gold Trading Bot for Deriv XAUUSD")
+    print(f"[BOT] Lot Size: {LOT_SIZE} | Stop Loss: {STOP_LOSS_PERCENT}% | Take Profit: {TAKE_PROFIT_PERCENT}%")
+
+    ws_thread = threading.Thread(target=connect_deriv, daemon=True)
+    ws_thread.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("[BOT] Shutting down...")
+        if ws:
+            ws.close()
+
+
+if __name__ == "__main__":
+    main()
