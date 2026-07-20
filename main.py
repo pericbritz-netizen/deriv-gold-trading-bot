@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ===== CONFIGURATION - ADJUST THESE SETTINGS =====
-DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")print(f"[BOT] Token loaded: {DERIV_API_TOKEN[:pat_a35d6a758f513ebfa20478893936e0bafa1e987e27b7c9c9d984a957f2855f94]}...")
+DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")
+print(f"[BOT] Token loaded: {DERIV_API_TOKEN[:pat_a35d6a758f513ebfa20478893936e0bafa1e987e27b7c9c9d984a957f2855f94]}...")
 pat_a35d6a758f513ebfa20478893936e0bafa1e987e27b7c9c9d984a957f2855f94
 LOT_SIZE = 0.02
 GOLD_SYMBOL = "frxXAUUSD"
