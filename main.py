@@ -22,7 +22,7 @@ RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
 # ===================================================
 
-DERIV_API_URL = "wss://52.89.214.238:443/websockets/v3?app_id=1089"
+DERIV_API_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089"
 
 ws = None
 prices = []
