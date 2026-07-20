@@ -11,6 +11,7 @@ load_dotenv()
 
 # ===== CONFIGURATION - ADJUST THESE SETTINGS =====
 DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")
+print(f"[BOT] Token length: {len(DERIV_API_TOKEN)}")
 LOT_SIZE = 0.02
 GOLD_SYMBOL = "frxXAUUSD"
 STOP_LOSS_PERCENT = 2.0
