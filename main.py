@@ -50,7 +50,7 @@ def connect_deriv():
 
 def on_open(ws):
     print("[BOT] Connected to Deriv")
-    ws.send(json.dumps({"authorize": DERIV_API_TOKEN}))
+    ws.send(json.dumps({"authorize": DERIV_API_TOKEN.strip()}))
     time.sleep(1)
     ws.send(json.dumps({
         "ticks_history": GOLD_SYMBOL,
